@@ -46,7 +46,7 @@ struct netdev_private {
 static netdev_tx_t mango_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
-	unsigned char buf[MANGO_MAX_FRAME_SIZE];
+	unsigned char buf[MANGO_MAX_FRAME_SIZE + ETH_HLEN + 4];
 
 	if (mango_dc_tx_free_space(DC_MANGO_CHANNEL) >= (skb->len + 4)) {
 		memcpy(buf, &skb->len, 4);
@@ -120,6 +120,9 @@ static int netdev_poll(struct napi_struct *napi, int budget)
 
 	napi_complete(napi);
 
+	/* Restore IRQ signaling */
+	mango_dc_set_mode(DC_MANGO_CHANNEL, DC_MODE_IRQ);
+
 	return 0;
 }
 
@@ -127,6 +130,9 @@ static irqreturn_t mango_dev_irq(int irq, void *data)
 {
 	struct net_device *dev = data;
 	struct netdev_private *np = netdev_priv(dev);
+
+	/* Disable IRQ signaling for incomming data */
+	mango_dc_set_mode(DC_MANGO_CHANNEL, DC_MODE_POLLING);
 
 	if (likely(napi_schedule_prep(&np->napi)))
 		__napi_schedule(&np->napi);
