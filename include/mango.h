@@ -20,6 +20,9 @@
 #ifndef __MANGO_H__
 #define __MANGO_H__
 
+#define DC_MODE_IRQ		1
+#define DC_MODE_POLLING		2
+
 /* Mango API */
 unsigned int mango_dc_open(unsigned int ch, unsigned int dest);
 unsigned int mango_dc_close(unsigned int ch);
@@ -27,6 +30,7 @@ unsigned int mango_dc_write(unsigned int ch, const unsigned char *p, unsigned in
 unsigned int mango_dc_read(unsigned int ch, unsigned char *p, unsigned int len);
 unsigned int mango_dc_tx_free_space(unsigned int ch);
 unsigned int mango_dc_reset(unsigned int ch);
+unsigned int mango_dc_set_mode(unsigned int ch, unsigned int mode);
 
 unsigned int mango_get_partition_id(void);
 

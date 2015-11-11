@@ -27,6 +27,7 @@
 #define MANGO_HVC_DC_CLOSE		0x13
 #define MANGO_HVC_DC_TX_FREE_SPACE	0x14
 #define MANGO_HVC_DC_RESET		0x15
+#define MANGO_HVC_DC_SET_MODE		0x16
 
 #define MANGO_HVC_PARTITION_ID		0x20
 #define MANGO_HVC_PARTITION_RESET	0x21
@@ -155,6 +156,16 @@ unsigned int mango_dc_reset(unsigned int ch)
 	return ret;
 }
 EXPORT_SYMBOL(mango_dc_reset);
+
+unsigned int mango_dc_set_mode(unsigned int ch, unsigned int mode)
+{
+	unsigned int ret;
+
+	ret = mango_hypervisor_call_2(MANGO_HVC_DC_SET_MODE, ch, mode);
+
+	return ret;
+}
+EXPORT_SYMBOL(mango_dc_set_mode);
 
 /*******************************************/
 /*     Mango Partition Management API      */
