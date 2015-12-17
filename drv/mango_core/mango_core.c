@@ -37,6 +37,17 @@
 #define MANGO_HVC_WD_PING		0x32
 #define MANGO_HVC_WD_SET_TIMEOUT	0x33
 
+#define MANGO_HVC_CONSOLE_WRITE		0x40
+
+#define MANGO_HVC_DEBUG			0x50
+
+#define MANGO_HVC_NET_OPEN		0x61
+#define MANGO_HVC_NET_SET_MODE		0x62
+#define MANGO_HVC_NET_TX		0x63
+#define MANGO_HVC_NET_RX		0x64
+#define MANGO_HVC_NET_CLOSE		0x65
+#define MANGO_HVC_NET_RX_SIZE		0x66
+
 #define mango_hypervisor_call_0(nr)					\
 ({									\
 	register unsigned int _ret;					\
@@ -233,6 +244,75 @@ unsigned int mango_watchdog_set_timeout(unsigned int timeout)
 	return ret;
 }
 EXPORT_SYMBOL(mango_watchdog_set_timeout);
+
+/*********************************/
+/*     Mango Networking API      */
+/*********************************/
+
+unsigned int mango_net_open(void)
+{
+	unsigned int ret;
+
+	ret = mango_hypervisor_call_0(MANGO_HVC_NET_OPEN);
+
+	return ret;
+}
+EXPORT_SYMBOL(mango_net_open);
+
+unsigned int mango_net_tx(unsigned int dest, const unsigned char *p, unsigned int len)
+{
+	unsigned int ret;
+
+	ret =  mango_hypervisor_call_3(MANGO_HVC_NET_TX,
+				       dest,
+				       (unsigned int)p,
+				       len);
+
+	return ret;
+}
+EXPORT_SYMBOL(mango_net_tx);
+
+unsigned int mango_net_rx(unsigned char *p, unsigned int len)
+{
+	unsigned int ret;
+
+	ret =  mango_hypervisor_call_2(MANGO_HVC_NET_RX,
+				       (unsigned int)p,
+				       (unsigned int)len);
+
+	return ret;
+}
+EXPORT_SYMBOL(mango_net_rx);
+
+unsigned int mango_net_close(void)
+{
+	unsigned int ret;
+
+	ret = mango_hypervisor_call_0(MANGO_HVC_NET_CLOSE);
+
+	return ret;
+}
+EXPORT_SYMBOL(mango_net_close);
+
+unsigned int mango_net_set_mode(unsigned int mode)
+{
+	unsigned int ret;
+
+	ret = mango_hypervisor_call_1(MANGO_HVC_NET_SET_MODE, mode);
+
+	return ret;
+}
+EXPORT_SYMBOL(mango_net_set_mode);
+
+unsigned int mango_net_get_rx_size(void)
+{
+	unsigned int ret;
+
+	ret = mango_hypervisor_call_0(MANGO_HVC_NET_RX_SIZE);
+
+	return ret;
+}
+EXPORT_SYMBOL(mango_net_get_rx_size);
 
 MODULE_AUTHOR("Alexander Smirnov");
 MODULE_DESCRIPTION("Mango Hypervisor Interface");

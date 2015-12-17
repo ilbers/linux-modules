@@ -29,12 +29,13 @@
 
 #include <mango.h>
 
-#define DC_MANGO_CHANNEL	1
-#define DC_MANGO_NET_IRQ	(130 + DC_MANGO_CHANNEL)
-#define MANGO_NET_TARGET	1
-#define MANGO_MAX_FRAME_SIZE	512
+#define MANGO_NET_IRQ		140	/* IRQ number for networking */
+#define MANGO_NET_TARGET	1	/* Destination partition */
 
-static int channel = 1;
+/* Mango network adapter modes */
+#define NET_MODE_IRQ		1	/* Each incoming packet is signaled by IRQ */
+#define NET_MODE_POLL		2	/* No IRQ generated on incoming data */
+
 static int max_interrupt_work = 20;
 
 struct netdev_private {
@@ -46,19 +47,15 @@ struct netdev_private {
 static netdev_tx_t mango_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
-	unsigned char buf[MANGO_MAX_FRAME_SIZE + ETH_HLEN + 4];
+	unsigned int ret;
 
-	if (mango_dc_tx_free_space(DC_MANGO_CHANNEL) >= (skb->len + 4)) {
-		memcpy(buf, &skb->len, 4);
-		memcpy(buf + 4, skb->data, skb->len);
+	/* Send packet to mango driver */
+	ret = mango_net_tx(MANGO_NET_TARGET, skb->data, skb->len);
+	if (ret)
+		return NETDEV_TX_BUSY;
 
-		mango_dc_write(DC_MANGO_CHANNEL, buf, skb->len + 4);
-
-		np->stats.tx_packets++;
-		np->stats.tx_bytes += skb->len;
-	} else {
-		printk(KERN_ALERT "error: no free space in dc channel, drop the packet\n");
-	}
+	np->stats.tx_packets++;
+	np->stats.tx_bytes += skb->len;
 
 	dev_kfree_skb(skb);
 
@@ -69,39 +66,25 @@ static int mango_dev_recv(struct net_device *dev, int *quota)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	struct sk_buff *skb;
-	unsigned char *buf;
 	int ret = 1;
-	size_t n, size;
+	size_t size;
 
-	n = mango_dc_read(DC_MANGO_CHANNEL, (void *)&size, 4);
+	/* Get incoming data size */
+	size = mango_net_get_rx_size();
 
-	if (n == 0) {
+	if (size == 0) {
 		ret = 0;
 		goto out;
 	}
 
-	if (n != 4) {
-		printk(KERN_ALERT "error: dc sync failed, requested (%d) - got (%d)\n", 4, n);
-		mango_dc_reset(DC_MANGO_CHANNEL);
-		goto out;
-	}
+	/* Allocate new socket buffer */
+	skb = netdev_alloc_skb_ip_align(dev, size);
 
-	buf = kmalloc(size, GFP_KERNEL);
-
-	n = mango_dc_read(DC_MANGO_CHANNEL, buf, size);
-	if (n != size) {
-		printk(KERN_ALERT "error: dc sync failed, requested (%d) - got (%d)\n", size, n);
-		mango_dc_reset(DC_MANGO_CHANNEL);
-		goto out;
-	}
-
-	skb = netdev_alloc_skb_ip_align(dev, n);
-	memcpy(skb_put(skb, size), buf, size);
-
-	kfree(buf);
+	/* Get the data */
+	ret = mango_net_rx(skb_put(skb, size), size);
 
 	np->stats.rx_packets++;
-	np->stats.rx_bytes += n;
+	np->stats.rx_bytes += size;
 
 	skb->protocol = eth_type_trans(skb, dev);
 	netif_receive_skb(skb);
@@ -121,7 +104,7 @@ static int netdev_poll(struct napi_struct *napi, int budget)
 	napi_complete(napi);
 
 	/* Restore IRQ signaling */
-	mango_dc_set_mode(DC_MANGO_CHANNEL, DC_MODE_IRQ);
+	mango_net_set_mode(NET_MODE_IRQ);
 
 	return 0;
 }
@@ -132,7 +115,7 @@ static irqreturn_t mango_dev_irq(int irq, void *data)
 	struct netdev_private *np = netdev_priv(dev);
 
 	/* Disable IRQ signaling for incomming data */
-	mango_dc_set_mode(DC_MANGO_CHANNEL, DC_MODE_POLLING);
+	mango_net_set_mode(NET_MODE_POLL);
 
 	if (likely(napi_schedule_prep(&np->napi)))
 		__napi_schedule(&np->napi);
@@ -145,33 +128,35 @@ static int mango_dev_init(struct net_device *dev)
 	struct netdev_private *np = netdev_priv(dev);
 	int err;
 
+	printk("mango_net: device init\n");
+
 	/* Setup Data Channel interface */
-	err = request_irq(DC_MANGO_NET_IRQ,
+	err = request_irq(MANGO_NET_IRQ,
 			  mango_dev_irq,
 			  0,
 			  "mango_net",
 			  (void *)dev);
 	if (err) {
-		printk(KERN_ALERT "mango_net: failed to request IRQ for dc\n");
+		printk(KERN_ALERT "mango_net: failed to request IRQ for networking\n");
 		goto err;
 	}
 
-	disable_irq_nosync(DC_MANGO_NET_IRQ);
-	enable_irq(DC_MANGO_NET_IRQ);
+	disable_irq_nosync(MANGO_NET_IRQ);
+	enable_irq(MANGO_NET_IRQ);
 
 	napi_enable(&np->napi);
 	netif_start_queue(dev);
 
-	err = mango_dc_open(DC_MANGO_CHANNEL, MANGO_NET_TARGET);
+	err = mango_net_open();
 	if (err) {
-		printk(KERN_ALERT "mango_dc: failed to open mango data channel\n");
+		printk(KERN_ALERT "mango_net: failed to open mango interface\n");
 		goto err;
 	}
 
 	return 0;
 err:
-	disable_irq_nosync(DC_MANGO_NET_IRQ);
-	free_irq(DC_MANGO_NET_IRQ, (void *)dev);
+	disable_irq_nosync(MANGO_NET_IRQ);
+	free_irq(MANGO_NET_IRQ, (void *)dev);
 	return err;
 }
 
@@ -182,9 +167,9 @@ static void mango_dev_uninit(struct net_device *dev)
 	netif_stop_queue(dev);
 	napi_disable(&np->napi);
 
-	mango_dc_close(DC_MANGO_CHANNEL);
-	disable_irq_nosync(DC_MANGO_NET_IRQ);
-	free_irq(DC_MANGO_NET_IRQ, (void *)dev);
+	mango_net_close();
+	disable_irq_nosync(MANGO_NET_IRQ);
+	free_irq(MANGO_NET_IRQ, (void *)dev);
 }
 
 static struct net_device_stats *mango_get_stats(struct net_device *dev)
@@ -222,12 +207,7 @@ static void mango_setup(struct net_device *dev)
 	dev->flags       &= ~IFF_MULTICAST;
 	dev->features	 |= NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_TSO;
 	dev->features	 |= NETIF_F_HW_CSUM | NETIF_F_HIGHDMA | NETIF_F_LLTX;
-
-	/* This network driver works over Mango data-channel. The default
-	 * buffer size is 2048 bytes. So to have a chance to store several
-	 * network packets - reduce MTU. Or, change buffer size in hypervisor.
-	 */
-	dev->mtu = MANGO_MAX_FRAME_SIZE;
+	dev->mtu         = 1500;
 
 	eth_hw_addr_random(dev);
 }
@@ -289,9 +269,6 @@ static void __exit mango_cleanup_module(void)
 
 module_init(mango_init_module);
 module_exit(mango_cleanup_module);
-
-module_param(channel, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-MODULE_PARM_DESC(channel, "data channel to use for transport");
 
 MODULE_AUTHOR("Alexander Smirnov");
 MODULE_DESCRIPTION("Mango Cross-Partition Networking");

@@ -39,4 +39,11 @@ unsigned int mango_watchdog_stop(void);
 unsigned int mango_watchdog_ping(void);
 unsigned int mango_watchdog_set_timeout(unsigned int timeout);
 
+unsigned int mango_net_open(void);
+unsigned int mango_net_tx(unsigned int dest, const unsigned char *p, unsigned int len);
+unsigned int mango_net_rx(unsigned char *p, unsigned int len);
+unsigned int mango_net_close(void);
+unsigned int mango_net_set_mode(unsigned int mode);
+unsigned int mango_net_get_rx_size(void);
+
 #endif /* __MANGO_H__ */
