@@ -1,7 +1,7 @@
 /*
  * Linux driver for Mango cross-partition networking.
  *
- * Copyright (c) 2014-2015 ilbers GmbH
+ * Copyright (c) 2014-2016 ilbers GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2
@@ -37,11 +37,13 @@
 #define NET_MODE_POLL		2	/* No IRQ generated on incoming data */
 
 static int max_interrupt_work = 20;
+static unsigned int iface_count = 0;
 
 struct netdev_private {
 	struct napi_struct      napi;
 	struct net_device       *dev;
 	struct net_device_stats stats;
+	unsigned int            iface;
 };
 
 static netdev_tx_t mango_dev_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -50,7 +52,7 @@ static netdev_tx_t mango_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	unsigned int ret;
 
 	/* Send packet to mango driver */
-	ret = mango_net_tx(MANGO_NET_TARGET, skb->data, skb->len);
+	ret = mango_net_tx(np->iface, MANGO_NET_TARGET, skb->data, skb->len);
 	if (ret)
 		return NETDEV_TX_BUSY;
 
@@ -70,7 +72,7 @@ static int mango_dev_recv(struct net_device *dev, int *quota)
 	size_t size;
 
 	/* Get incoming data size */
-	size = mango_net_get_rx_size();
+	size = mango_net_get_rx_size(np->iface);
 
 	if (size == 0) {
 		ret = 0;
@@ -81,7 +83,7 @@ static int mango_dev_recv(struct net_device *dev, int *quota)
 	skb = netdev_alloc_skb_ip_align(dev, size);
 
 	/* Get the data */
-	ret = mango_net_rx(skb_put(skb, size), size);
+	ret = mango_net_rx(np->iface, skb_put(skb, size), size);
 
 	np->stats.rx_packets++;
 	np->stats.rx_bytes += size;
@@ -104,7 +106,7 @@ static int netdev_poll(struct napi_struct *napi, int budget)
 	napi_complete(napi);
 
 	/* Restore IRQ signaling */
-	mango_net_set_mode(NET_MODE_IRQ);
+	mango_net_set_mode(np->iface, NET_MODE_IRQ);
 
 	return 0;
 }
@@ -115,7 +117,7 @@ static irqreturn_t mango_dev_irq(int irq, void *data)
 	struct netdev_private *np = netdev_priv(dev);
 
 	/* Disable IRQ signaling for incomming data */
-	mango_net_set_mode(NET_MODE_POLL);
+	mango_net_set_mode(np->iface, NET_MODE_POLL);
 
 	if (likely(napi_schedule_prep(&np->napi)))
 		__napi_schedule(&np->napi);
@@ -147,7 +149,7 @@ static int mango_dev_init(struct net_device *dev)
 	napi_enable(&np->napi);
 	netif_start_queue(dev);
 
-	err = mango_net_open();
+	err = mango_net_open(np->iface);
 	if (err) {
 		printk(KERN_ALERT "mango_net: failed to open mango interface\n");
 		goto err;
@@ -167,7 +169,7 @@ static void mango_dev_uninit(struct net_device *dev)
 	netif_stop_queue(dev);
 	napi_disable(&np->napi);
 
-	mango_net_close();
+	mango_net_close(np->iface);
 	disable_irq_nosync(MANGO_NET_IRQ);
 	free_irq(MANGO_NET_IRQ, (void *)dev);
 }
@@ -229,6 +231,8 @@ static int __init mango_init_one(void)
 
 	np = netdev_priv(dev_mango);
 	np->dev = dev_mango;
+
+	np->iface = iface_count++;
 
 	netif_napi_add(dev_mango, &np->napi, netdev_poll, max_interrupt_work);
 
